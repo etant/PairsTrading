@@ -210,8 +210,8 @@ if __name__ == '__main__':
                     client.futures_create_order(symbol=x_name,side=currentLS[0],type="MARKET",reduceOnly = True,quantity = abs(currentPos[1]))
                     client.futures_create_order(symbol=y_name,side=currentLS[1],type="MARKET",reduceOnly = True,quantity =abs(currentPos[0]))
                     log.write("expectations: "+"\n")
-                    log.write(y_name + "price: " +str(signal.y)+"\n")
-                    log.write(x_name + "price: " +str(signal.x)+"\n")
+                    log.write(y_name + " price: " +str(signal.y)+"\n")
+                    log.write(x_name + " price: " +str(signal.x)+"\n")
 
                 except Exception as e:
                         log.write("There was an error: " + str(e)+"\n")
