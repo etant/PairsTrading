@@ -11,24 +11,19 @@ import numpy as np
 import pytz
 #pip install TA-Lib
 
-def getBinanceDataFuture(symbol, interval, start, end, limit=5000):
+def getBinanceDataFuture(symbol, interval, start, end):
     df = pd.DataFrame()
     startDate = end
     prev = start
+    #while loop to get all the data because binance api limits each call
     while (startDate!=prev):
         prev = startDate
-        url = 'https://fapi.binance.com/fapi/v1/klines?symbol=' + \
-            symbol + '&interval=' + interval
-        if startDate is not None:
-            url += '&endTime=' + str(startDate)
+        url = 'https://fapi.binance.com/fapi/v1/klines?symbol=' + symbol + '&interval=' + interval + '&endTime=' + str(startDate)
         df2 = pd.read_json(url)
         df2.columns = ['Opentime', 'Open', 'High', 'Low', 'Close', 'Volume', 'Closetime', 'Quote asset volume', 'Number of trades','Taker by base', 'Taker buy quote', 'Ignore']
-
         df = pd.concat([df2, df], axis=0, ignore_index=True, keys=None)
         startDate = df.Opentime[0]
-
-
-
+    #format and drop duplicate data
     df.reset_index(drop=True, inplace=True)
     df['Opentime'] = pd.to_datetime(df['Opentime'],unit='ms')
     df = df.loc[1:]
@@ -99,6 +94,7 @@ def signalf(varaible,a,b,a_name,b_name):
 
     return bbands,y_name,x_name
 
+#binance has different quantity precision for every token
 def quantityPercision(symbol,size):
     info = client.futures_exchange_info()
     for x in info['symbols']:
@@ -107,10 +103,11 @@ def quantityPercision(symbol,size):
     factor = 10.0**prec
     return int(size*factor)/factor
 
+
 def current_milli_time():
     return round(time.time() * 1000)
 
-
+#-1 is short spread, 0 is stay the same, while 1 is long spread
 def getPostion(signal,currentPos):
     if currentPos ==[0,0]:
         if (signal["spread"]>signal["Short"])&(signal["spread"]<signal["stShort"]):
@@ -133,77 +130,91 @@ def getPostion(signal,currentPos):
 
 if __name__ == '__main__':
 
-
+    # create binance api connection
     client = Client(api_key, api_secret)
+    #creat a trading log to record all transactions, make sure what is signaled is being excuted
     log = open("tradingLog.txt", "a")
 
-
+    #token being traded
     token1="EOSUSDT"
     token2="NEOUSDT"
+    #leverage for the trades
     new_lvrg = 1
     client.futures_change_leverage(symbol = token1,leverage=new_lvrg)
     client.futures_change_leverage(symbol = token2,leverage=new_lvrg)
-
+    # a never ending while loop, that trades every day at UTC midnight
     while True:
-
+        #find out how many seconds to sleep to, untill UTC midnight
         dt = datetime.utcnow().date()
         today = datetime.combine(dt, datetime.min.time())
         tmr = today + timedelta(days = 1)
         now = datetime.utcnow()
         sleeptime = (tmr-now).seconds
         time.sleep(sleeptime)
-
+        #write down todays date on the trading log
         utc_now_dt = datetime.now(tz=pytz.UTC)
         log.write(str(utc_now_dt.strftime("%d/%m/%Y %H:%M:%S"))+": "+"\n")
-
+        #get price data of tokens
         token1data = getBinanceDataFuture(token1,'1d',1458955882,current_milli_time())
         token2data = getBinanceDataFuture(token2,'1d',1458955882,current_milli_time())
-
         #LookBack Period, SD enter, Sd exit, stoploss
         param = [10, 1.8, 0.8, 4.0]
         bbands,y_name,x_name = signalf(param,token1data,token2data,token1,token2)
+        #get todays signal
         signal = bbands.iloc[-1]
-
-        #get current account situation
-        cap = float(client.futures_account()["totalMarginBalance"])*.8
+        #get current account situation, cap is times by .99 to include slipage and fees
+        cap = float(client.futures_account()["totalMarginBalance"])*.99
         df = pd.DataFrame(client.futures_account()['positions'])
         df = df.apply(lambda col:pd.to_numeric(col, errors='ignore'))
         #get current long short position size
-
         currentPos = [float(df[df["symbol"]==y_name].positionAmt),float(df[df["symbol"]==x_name].positionAmt)]
         position = getPostion(signal,currentPos)
-
+        #if signal is long or short
         if position !=0:
+            #if signal went from short to long or long to short, exit current positions
+            if (position != np.sign(currentPos[0])) & (currentPos[0]!=0):
+                try:
+                    currentLS = ['SELL' if i < 0 else 'BUY' for i in currentPos]
+                    client.futures_create_order(symbol=x_name,side=currentLS[0],type="MARKET",reduceOnly = True,quantity = abs(currentPos[1]))
+                    client.futures_create_order(symbol=y_name,side=currentLS[1],type="MARKET",reduceOnly = True,quantity =abs(currentPos[0]))
+                    currentPos=[0,0]
+                except Exception as e:
+                        log.write("There was an error: " + str(e)+"\n")
+            #if current position isn't long or short, then execute long or shor trade
             if currentPos==[0,0]:
                 #get percetange of y and x
                 yp = signal["y"]/(signal["x"]*signal["hedge"]+signal["y"])
                 xp = 1-yp
                 #get sizing
                 size = np.array([position*cap*yp/float(client.futures_symbol_ticker(symbol = y_name)['price']),-1*position*cap*xp/float(client.futures_symbol_ticker(symbol = x_name)['price'])])
+                #if its negative size, then sell, else its buy
                 LS = ['SELL' if i < 0 else 'BUY' for i in size]
-
                 try:
+                    #execute orders
                     client.futures_create_order(symbol=y_name,type='MARKET',side=LS[0],quantity=quantityPercision(y_name,abs(size[0])))
                     client.futures_create_order(symbol=x_name,type='MARKET',side=LS[1],quantity=quantityPercision(x_name,abs(size[1])))
-
+                    # get executed price and quantity
                     df = pd.DataFrame(client.futures_account()['positions'])
                     df = df.apply(lambda col:pd.to_numeric(col, errors='ignore'))
                     df = df[df["positionAmt"]!=0]
                     log.write("executed: "+"\n")
                     for i in df.index:
                         log.write(df["symbol"][i] + " price: " +str(float(df["entryPrice"][i] )) + " quant: " + str(float(df["positionAmt"][i]))+"\n")
+                    #get execpected quanitty and price, compare to see if there is a difference
                     log.write("expectations: "+"\n")
                     log.write(y_name + " price: " +str(signal.y) + " quant: " + str(size[0])+"\n")
                     log.write(x_name + " price: " +str(signal.x) + " quant: " + str(size[1])+"\n")
-
                 except Exception as e:
                         log.write("There was an error: " + str(e)+"\n")
-
+            # if current signal is same as current position, do nothing
             else:
                 pass
+        #if signal is to exit position
         else:
+            #if signal is to exit postion, while no current position, do nothing
             if currentPos==[0,0]:
                 pass
+            # if signal is to exit postion, and current position is long or short, exit postion
             else:
                 try:
                     currentLS = ['SELL' if i < 0 else 'BUY' for i in currentPos]
@@ -212,8 +223,8 @@ if __name__ == '__main__':
                     log.write("expectations: "+"\n")
                     log.write(y_name + " price: " +str(signal.y)+"\n")
                     log.write(x_name + " price: " +str(signal.x)+"\n")
-
                 except Exception as e:
                         log.write("There was an error: " + str(e)+"\n")
+        log.write("Balance: "+str(client.futures_account()['totalMarginBalance'])+"\n")
         log.write("----------------------------------"+"\n")
         log.flush()
