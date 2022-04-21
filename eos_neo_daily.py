@@ -67,7 +67,7 @@ def signalf(varaible,a,b,a_name,b_name):
 
 
 
-    #creating bbands
+    #creating enter,exit, stop loss boilerger bands
     bands = pd.DataFrame(BBANDS(spread,timeperiod=lookback,nbdevup=sdenter,nbdevdn = sdenter,matype=1)).T
     bands = bands.set_index(pairPrice.index)
     bands.columns = ['Short','1mid','Long']
@@ -103,38 +103,56 @@ def quantityPercision(symbol,size):
     factor = 10.0**prec
     return int(size*factor)/factor
 
-
+#get time right now in miliseconds
 def current_milli_time():
     return round(time.time() * 1000)
 
 #-1 is short spread, 0 is stay the same, while 1 is long spread
 def getPostion(signal,currentPos):
+    #if current position is nothing
     if currentPos ==[0,0]:
+        #if spread is between short and stoploss short signal, short
         if (signal["spread"]>signal["Short"])&(signal["spread"]<signal["stShort"]):
             return -1
+        #if spread is between long and stop loss long signal, long
         elif (signal["spread"]<signal["Long"]) & (signal["spread"]>signal["stLong"]):
             return 1
+        #if spread is not in range of signals, do nothing
         else:
             return 0
+    #if current position is short spread
     elif (np.sign(currentPos)==[-1,1]).all():
+        #if spread, hit below the exit threshold, or went above stop loss threshold, either exit or go long
         if (signal["spread"]<signal["exShort"])|(signal["spread"]>signal["stShort"]):
-            return 0
+            # if spread goes into long territory, enter long
+            if (signal["spread"]<signal["Long"])&(signal["spread"]>signal["stLong"]):
+                return 1
+            #if spread is not in long territory but triggered exit, exit
+            else:
+                return 0
+        #else stay short
         else:
             return -1
+    #if current postion is long spread
     else:
+        #if spread hit the stop loss or exit signal, either exit or go short
         if (signal["spread"]>signal["exLong"])|(signal["spread"]<signal["stLong"]):
-            return 0
+            # if spread goes into short territory, enter short
+            if (signal["spread"]>signal["Short"])&(signal["spread"]<signal["stShort"]):
+                return -1
+            #spread not in short terrirtory, so exit
+            else:
+                return 0
+        #else stay long
         else:
             return 1
 
 
 if __name__ == '__main__':
-
     # create binance api connection
     client = Client(api_key, api_secret)
     #creat a trading log to record all transactions, make sure what is signaled is being excuted
     log = open("tradingLog.txt", "a")
-
     #token being traded
     token1="EOSUSDT"
     token2="NEOUSDT"
