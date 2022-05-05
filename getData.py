@@ -63,3 +63,4 @@ if __name__ == '__main__':
         token1Data = dataOrganizeDaily(token1)
         token2Data = dataOrganizeDaily(token2)
     merged = token1Data.merge(token2Data, left_index=True, right_index=True, how='left')
+    merged.to_csv()
