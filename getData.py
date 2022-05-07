@@ -27,6 +27,30 @@ def getBinanceDataFuture(symbol, interval, start, end, limit=5000):
     df = df.drop_duplicates(keep='first')
     return df
 
+def getBinanceDataFundingRate(symbol, interval, start, end, limit=1000):
+    df = pd.DataFrame()
+    startDate = start
+    prev = 0
+    while (startDate!=prev):
+        prev = startDate
+        url = 'https://fapi.binance.com/fapi/v1/fundingRate?symbol=' + \
+            symbol + '&startTime=' + str(startDate) + '&limit=' + str(limit)
+
+        df2 = pd.read_json(url)
+        df2.columns = ['symbol','fundingTime','fundingRate']
+
+        df = pd.concat([df, df2], axis=0, ignore_index=True, keys=None)
+        startDate = df2.fundingTime[len(df2)-1]
+
+    df.reset_index(drop=True, inplace=True)
+    df['fundingTime'] = pd.to_datetime(df['fundingTime'],unit='ms')
+    #df = df.loc[1:]
+    #df = df.set_index('fundingTime')
+    df = df.drop_duplicates(keep='first')
+    df['fundingTime'] = df['fundingTime'].dt.floor('Min')
+    df = df.set_index('fundingTime')
+    return df
+
 def dataOrganizeDaily(ticker):
     fr =  getBinanceDataFundingRate(ticker,'1d',1458955882,current_milli_time())
     data = getBinanceDataFuture(ticker,'1d',1458955882,current_milli_time())
