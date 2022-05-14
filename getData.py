@@ -4,6 +4,9 @@ import time
 from itertools import combinations
 import numpy as np
 import math
+import statsmodels.api as sm
+from statsmodels.tsa.stattools import adfuller
+
 
 def getBinanceDataFuture(symbol, interval, start, end, limit=5000):
     df = pd.DataFrame()
@@ -77,6 +80,7 @@ def current_milli_time():
     return round(time.time() * 1000)
 
 if __name__ == '__main__':
+
     token1 = input("Enter first token (all caps plus USDT such as BTCUSDT): ")
     token2 = input("Enter another:")
     hOrD = input("Hourly or Daily (H/D):")
@@ -86,5 +90,21 @@ if __name__ == '__main__':
     else:
         token1Data = dataOrganizeDaily(token1)
         token2Data = dataOrganizeDaily(token2)
+
     merged = token1Data.merge(token2Data, left_index=True, right_index=True, how='left')
-    merged.to_csv()
+    merged = merged.dropna()
+
+    reg = sm.OLS(merged['Open_x'],merged['Open_y']).fit()
+    reg2 = sm.OLS(merged['Open_y'],merged['Open_x']).fit()
+
+#     #see which token should be a the dependent variable
+    if adfuller(reg.resid)[1]<adfuller(reg2.resid)[1]:
+        y = token1Data[['Open','fr']]
+        x = token2Data[['Open','fr']]
+
+    else:
+        x = token2Data[['Open','fr']]
+        y = token1Data[['Open','fr']]
+
+    end = x.merge(y, left_index=True, right_index=True, how='left').dropna()
+    end.to_csv("data.csv");
